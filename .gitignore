@@ -1,0 +1,41 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+.venv/
+
+# Jupyter & Colab
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Datasets (lưu trữ tập trung trên Google Drive)
+data/raw/
+data/processed/
+*.zip
+*.tar
+*.tar.gz
+
+# Cache của Ultralytics & Model Weights lớn
+Ultralytics/
+*.pt
+!models/yolo26n_visdrone_filtered_run1/weights/best.pt
+!models/yolo26n_merged_run2/weights/best.pt
+
+# Output runs & video tạm
+runs/
+*.avi
+*.mp4
+!data/demo_drone_visdrone.mp4
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# local scripts
+scripts/

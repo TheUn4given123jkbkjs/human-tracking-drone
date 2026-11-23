@@ -1,0 +1,8 @@
+# Cấu hình Huấn luyện YOLO26n Phân Tầng Độ Cao (VisDrone)
+path: D:/record_by_me/NCKH/human_tracking_drone/data/processed/visdrone
+train: images/train
+val: images/val
+
+# Tên class chuẩn hóa duy nhất: Person
+names:
+  0: person
