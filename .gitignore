@@ -19,11 +19,10 @@ data/processed/
 *.tar
 *.tar.gz
 
-# Cache của Ultralytics & Model Weights lớn
+# Cache của Ultralytics & Checkpoints phụ (giữ lại toàn bộ các file best.pt)
 Ultralytics/
 *.pt
-!models/yolo26n_visdrone_filtered_run1/weights/best.pt
-!models/yolo26n_merged_run2/weights/best.pt
+!**/best.pt
 
 # Output runs & video tạm
 runs/
