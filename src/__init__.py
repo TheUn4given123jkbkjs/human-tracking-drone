@@ -1,4 +1,4 @@
-from src.config import MODEL_REGISTRY, TRACKER_REGISTRY
+from src.config import TRACKER_REGISTRY, DEFAULT_MODEL, MODELS_DIR
 from src.metrics import TrackingMetrics
 from src.detector import UAVDetector
 from src.tracker import UAVTracker
@@ -11,6 +11,7 @@ __all__ = [
     "TrackingVisualizer",
     "TrackingMetrics",
     "UAVTrackingPipeline",
-    "MODEL_REGISTRY",
     "TRACKER_REGISTRY",
+    "DEFAULT_MODEL",
+    "MODELS_DIR"
 ]

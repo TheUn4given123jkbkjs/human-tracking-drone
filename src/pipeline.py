@@ -53,19 +53,29 @@ class UAVTrackingPipeline:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Tự động sinh đường dẫn đầu ra
+        # Tự động chuẩn hóa đường dẫn đầu ra theo tên model và thuật toán vào runs/track/
+        vid_stem = Path(source_path).stem
+        default_filename = f"{self.detector.model_name}_{self.tracker.tracker_type}_{vid_stem}.mp4"
+
         if output_path is None:
             DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            model_tag = "run2" if "run2" in self.detector.model_path else ("run1" if "run1" in self.detector.model_path else "model")
-            vid_stem = Path(source_path).stem
-            output_path = str(DEFAULT_OUTPUT_DIR / f"track_{model_tag}_{self.tracker.tracker_type}_{vid_stem}.mp4")
+            output_path = str(DEFAULT_OUTPUT_DIR / default_filename)
+        else:
+            out_p = Path(output_path)
+            if out_p.is_dir() or out_p.suffix == "":
+                out_p.mkdir(parents=True, exist_ok=True)
+                output_path = str(out_p / default_filename)
+            else:
+                out_p.parent.mkdir(parents=True, exist_ok=True)
+                output_path = str(out_p)
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, orig_fps, (width, height))
 
         print("="*70)
         print("🚁 UAV HUMAN TRACKING PIPELINE (MODULAR ARCHITECTURE)")
-        print(f" • Mô hình:     {self.detector.model_path} ({self.detector.num_parameters:,} params)")
+        print(f" • Mô hình:     {self.detector.model_name} ({self.detector.num_parameters:,} params)")
+        print(f" • Trọng số:    {self.detector.model_path}")
         print(f" • Thuật toán:  {self.tracker.tracker_type.upper()}")
         print(f" • Video vào:   {source_path} ({width}x{height} @ {orig_fps:.1f} FPS, {total_vid_frames} frames)")
         print(f" • Video ra:    {output_path}")

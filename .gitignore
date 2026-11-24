@@ -36,5 +36,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# local scripts
-scripts/
+# Thư mục làm việc cá nhân (scripts, checklists, ghi chú cục bộ)
+local/
+
+# Thư mục kỹ năng workspace cục bộ (kích hoạt slash commands IDE, không push remote)
+.agents/

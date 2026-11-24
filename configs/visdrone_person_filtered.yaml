@@ -1,5 +1,5 @@
 # Cấu hình Huấn luyện YOLO26n Phân Tầng Độ Cao (VisDrone)
-path: D:/record_by_me/NCKH/human_tracking_drone/data/processed/visdrone
+path: data/processed/visdrone
 train: images/train
 val: images/val
 
