@@ -58,6 +58,32 @@
 
 ---
 
+### 2.3. Hiệu Năng Đột Phá Của Tầng Appearance Memory Bank (Tái Nhận Diện Re-ID Đa Vùng)
+
+Để khắc phục nhược điểm nhảy ID khi đối tượng bị che khuất tạm thời hoặc drone chao liệng, hệ thống được trang bị tầng **Appearance Memory Bank** (trích xuất vector màu HSV đa vùng không gian 3 tầng cơ thể: Đầu/Thân/Chân + so khớp Cosine Similarity lịch sử).
+
+#### Bảng Đo Lường Hiệu Năng Khi Kích Hoạt Appearance Memory Bank (`test_drone_square_pdestre.mp4`):
+
+| Cấu Hình Hệ Thống | Trạng Thái Memory Bank | Số Unique IDs | Tỷ Lệ Giảm ID Switches | Lượt Re-ID Khôi Phục | Live Tracking FPS | Nhận Xét Khoa Học |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`yolo26s_merged` + ByteTrack** | **TẮT** *(Gốc)* | 102 IDs | Baseline | 0 | ~52 – 80 FPS | Tốc độ cao nhưng đứt gãy vết liên tục |
+| **`yolo26s_merged` + ByteTrack** | **BẬT (Memory Bank)** | **34 IDs** | **-66.7% (Đột phá)** | **134 lượt** | **~58 – 73 FPS** | **Sweet Spot: Giảm 2/3 số ID nhảy, tốc độ cực nhanh gấp 3.5 lần BoT-SORT** |
+| **`yolo26s_merged` + BoT-SORT** | **TẮT** *(Gốc)* | 70 IDs | Baseline | 0 | ~18 – 27 FPS | Bù rung lắc tốt nhưng FPS thấp |
+| **`yolo26s_merged` + BoT-SORT** | **BẬT (Memory Bank)** | **33 IDs** | **-52.9%** | **83 lượt** | ~17 – 20 FPS | Độ ổn định danh tính cao nhất (33 IDs), phù hợp máy trạm GPU mạnh |
+
+---
+
+### 2.4. Giao Thức Khóa Mục Tiêu (Target Lock) & Điều Phối Bán Tự Hành (Semi-Autonomous FSM)
+
+Kiến trúc vận hành (`src/target_protocol.py`) định hình chu trình điều khiển thông minh giữa Ground Station và Drone (Pi 5):
+1. **Pha Tự Do (SEARCH_ALL_IDS):** Toàn bộ ID người trong khung hình đều được lưu trữ vector ngoại hình trong Memory Bank.
+2. **Pha Khóa Mục Tiêu (TARGET_LOCKED):** Phi công chọn 1 ID $\to$ GCS gửi gói tin `LockTargetCommand` $\to$ Pi 5 xác nhận bằng gói `LockTargetAck` $\to$ Memory Bank chuyển sang chế độ Dedicated Memory cho mục tiêu này. Drone kích hoạt chế độ bay bán tự hành (hỗ trợ bám tâm nhưng vẫn ưu tiên quyền điều khiển từ tay cầm phi công).
+3. **Pha Mất Dấu & Tìm Lại (TARGET_LOST_SPIN_SEARCH):** Nếu phi công lái đổi góc nhìn làm mất mục tiêu $\to$ Drone tự động thực hiện thao tác xoay $360^\circ$ quét tìm kiếm dựa trên template ngoại hình đã nhớ.
+   - *Nếu tìm lại được:* Lập tức tái nhận diện (Re-ID) và tiếp tục bám vết (`TARGET_LOCKED`).
+   - *Nếu hết thời gian xoay (Timeout):* Dừng xoay và chuyển sang trạng thái `STANDBY_HOVER` (giữ vị trí an toàn).
+
+---
+
 ## 🛠️ 3. CÀI ĐẶT MÔI TRƯỜNG
 
 Yêu cầu: **Python 3.10 – 3.12** và card đồ họa NVIDIA (khuyên dùng CUDA 12+).
@@ -104,6 +130,9 @@ python track_drone.py --model <tên_mô_hình|đường_dẫn_.pt> --tracker <by
 | **`--conf`** | Float | `0.20` | Ngưỡng tin cậy phát hiện (cự ly xa: `0.15 - 0.20`; cự ly gần: `0.25 - 0.35`). |
 | **`--iou`** | Float | `0.50` | Ngưỡng IoU ghép cặp liên kết vết. |
 | **`--trail`** / **`--no-trail`** | Flag | `--trail` *(Bật)* | Hiện hoặc ẩn vệt quỹ đạo di chuyển theo màu ID. |
+| **`--memory`** / **`--no-memory`** | Flag | `--memory` *(Bật)* | Bật hoặc tắt tầng Appearance Memory Bank (Re-ID đa vùng). |
+| **`--sim-thresh`** | Float | `0.60` | Ngưỡng tương đồng Cosine để tái nhận diện (Re-ID) mục tiêu trong bộ nhớ. |
+| **`--max-lost-frames`** | Int | `60` | Số frame tối đa lưu trữ mục tiêu bị mất dấu trước khi giải phóng khỏi RAM. |
 | **`--step`** | Int | `1` | Bước nhảy frame: `1` (Full 30 FPS) hoặc `2` (Half-rate 15 FPS, giảm 50% tải GPU). |
 | **`--max-frames`** | Int | `None` | Giới hạn số frame xử lý (ví dụ: `--max-frames 200` để test nhanh). |
 | **`--display`** | Flag | `False` | Mở cửa sổ OpenCV GUI hiển thị quá trình bám vết trực tiếp. |

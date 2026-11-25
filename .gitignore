@@ -38,6 +38,7 @@ Thumbs.db
 
 # Thư mục làm việc cá nhân (scripts, checklists, ghi chú cục bộ)
 local/
+ref/
 
 # Thư mục kỹ năng workspace cục bộ (kích hoạt slash commands IDE, không push remote)
 .agents/

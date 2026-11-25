@@ -117,6 +117,24 @@ def parse_args():
         help="Hiện/Ẩn vệt đường quỹ đạo tracking (--trail: hiện | --no-trail: ẩn)"
     )
     parser.add_argument(
+        "--memory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Bật/Tắt tầng Appearance Memory Bank (--memory: bật | --no-memory: tắt)"
+    )
+    parser.add_argument(
+        "--sim-thresh",
+        type=float,
+        default=0.60,
+        help="Ngưỡng Cosine Similarity để Re-ID mục tiêu trong Memory Bank"
+    )
+    parser.add_argument(
+        "--max-lost-frames",
+        type=int,
+        default=60,
+        help="Số frame tối đa lưu vết mục tiêu bị mất dấu trong bộ nhớ"
+    )
+    parser.add_argument(
         "--max-frames",
         type=int,
         default=None,
@@ -147,10 +165,13 @@ def main():
         device=args.device
     )
 
-    # 2. Khởi tạo UAVTracker (Quản lý liên kết quỹ đạo ByteTrack / BoT-SORT)
+    # 2. Khởi tạo UAVTracker (Quản lý liên kết quỹ đạo ByteTrack / BoT-SORT + Memory Bank)
     tracker = UAVTracker(
         detector=detector,
-        tracker_type=args.tracker
+        tracker_type=args.tracker,
+        use_memory=args.memory,
+        similarity_thresh=args.sim_thresh,
+        max_lost_frames=args.max_lost_frames
     )
 
     # 3. Khởi tạo TrackingVisualizer (Vẽ BBox, Trajectory trail, HUD Telemetry)

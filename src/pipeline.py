@@ -1,5 +1,6 @@
 """
 Module Pipeline tích hợp toàn diện quy trình bám vết người bằng UAV.
+Hỗ trợ đo lường và hiển thị hiệu năng Appearance Memory Bank.
 """
 
 import os
@@ -18,7 +19,7 @@ from src.config import DEFAULT_OUTPUT_DIR
 class UAVTrackingPipeline:
     """
     Pipeline điều phối luồng xử lý video từ camera drone:
-    Video In -> UAVDetector -> UAVTracker -> TrackingVisualizer -> TrackingMetrics -> Video Out.
+    Video In -> UAVDetector -> UAVTracker (+Memory Bank) -> TrackingVisualizer -> TrackingMetrics -> Video Out.
     """
 
     def __init__(
@@ -55,7 +56,8 @@ class UAVTrackingPipeline:
 
         # Tự động chuẩn hóa đường dẫn đầu ra theo tên model và thuật toán vào runs/track/
         vid_stem = Path(source_path).stem
-        default_filename = f"{self.detector.model_name}_{self.tracker.tracker_type}_{vid_stem}.mp4"
+        mem_suffix = "_mem" if getattr(self.tracker, "use_memory", False) else ""
+        default_filename = f"{self.detector.model_name}_{self.tracker.tracker_type}{mem_suffix}_{vid_stem}.mp4"
 
         if output_path is None:
             DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -72,11 +74,13 @@ class UAVTrackingPipeline:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, orig_fps, (width, height))
 
+        mem_status = "BẬT (Appearance Memory Bank)" if getattr(self.tracker, "use_memory", False) else "TẮT"
         print("="*70)
         print("🚁 UAV HUMAN TRACKING PIPELINE (MODULAR ARCHITECTURE)")
         print(f" • Mô hình:     {self.detector.model_name} ({self.detector.num_parameters:,} params)")
         print(f" • Trọng số:    {self.detector.model_path}")
         print(f" • Thuật toán:  {self.tracker.tracker_type.upper()}")
+        print(f" • Bộ nhớ Memory: {mem_status}")
         print(f" • Video vào:   {source_path} ({width}x{height} @ {orig_fps:.1f} FPS, {total_vid_frames} frames)")
         print(f" • Video ra:    {output_path}")
         print(f" • Frame Step:  {self.frame_step} ({'Full 30 FPS' if self.frame_step == 1 else 'Half-rate 15 FPS'})")
@@ -101,8 +105,8 @@ class UAVTrackingPipeline:
 
             t_start = time.perf_counter()
 
-            # Gọi Tracker
-            res = self.tracker.track(frame)
+            # Gọi Tracker (kèm frame_idx để Memory Bank theo dõi thời gian sống)
+            res = self.tracker.track(frame, frame_idx=frame_idx)
 
             t_end = time.perf_counter()
             frame_elapsed_ms = (t_end - t_start) * 1000.0
@@ -110,8 +114,21 @@ class UAVTrackingPipeline:
             inf_ms = res.speed.get('inference', 0.0)
             post_ms = res.speed.get('postprocess', 0.0)
 
+            # Lấy thông tin Re-ID và Locked Target từ kết quả
+            reacquired_ids = [p["track_id"] for p in getattr(res, "reacquired_this_frame", [])]
+            reacquired_total = 0
+            locked_id = None
+            if getattr(self.tracker, "use_memory", False) and self.tracker.memory_bank is not None:
+                reacquired_total = self.tracker.memory_bank.total_reacquired_count
+                locked_id = self.tracker.memory_bank.locked_target_id
+
             # Vẽ bounding box & trajectory
-            frame, active_ids = self.visualizer.draw_tracks(frame, res.boxes)
+            frame, active_ids = self.visualizer.draw_tracks(
+                frame=frame,
+                boxes_result=res.boxes,
+                reacquired_ids=reacquired_ids,
+                locked_id=locked_id
+            )
 
             # Ghi nhận chỉ số
             self.metrics.record_frame(inf_ms, post_ms, len(active_ids), active_ids)
@@ -126,7 +143,9 @@ class UAVTrackingPipeline:
                 inference_ms=inf_ms,
                 postprocess_ms=post_ms,
                 active_count=len(active_ids),
-                unique_total=len(self.metrics.unique_track_ids)
+                unique_total=len(self.metrics.unique_track_ids),
+                reacquired_total=reacquired_total,
+                locked_id=locked_id
             )
 
             out.write(frame)
@@ -137,7 +156,8 @@ class UAVTrackingPipeline:
                     break
 
             if frame_idx % 30 == 0 or frame_idx == total_vid_frames or (max_frames and frame_idx == max_frames):
-                print(f"[{frame_idx:04d}/{total_vid_frames}] Active: {len(active_ids):02d} | Live FPS: {live_fps:5.1f} | Inf: {inf_ms:4.1f}ms | Post: {post_ms:4.2f}ms")
+                reid_log = f" | Re-ID: {reacquired_total}" if getattr(self.tracker, "use_memory", False) else ""
+                print(f"[{frame_idx:04d}/{total_vid_frames}] Active: {len(active_ids):02d} | Live FPS: {live_fps:5.1f} | Inf: {inf_ms:4.1f}ms | Post: {post_ms:4.2f}ms{reid_log}")
 
         cap.release()
         out.release()
@@ -151,11 +171,17 @@ class UAVTrackingPipeline:
     def print_summary(self, output_path: str):
         """In báo cáo khoa học tổng hợp sau khi hoàn tất video."""
         m = self.metrics
+        mem_bank = getattr(self.tracker, "memory_bank", None)
+        reacquired_total = mem_bank.total_reacquired_count if mem_bank is not None else 0
+
         print("\n" + "="*70)
         print("📊 BÁO CÁO KHOA HỌC: HIỆU NĂNG BÁM VẾT THỜI GIAN THỰC")
         print("="*70)
         print(f" • Mô hình:                {self.detector.model_name}")
         print(f" • Thuật toán Tracking:     {self.tracker.tracker_type.upper()}")
+        print(f" • Tầng Appearance Memory:  {'KÍCH HOẠT (Re-ID Bank)' if getattr(self.tracker, 'use_memory', False) else 'TẮT'}")
+        if getattr(self.tracker, "use_memory", False):
+            print(f" • Tái nhận diện qua Memory:{reacquired_total} lượt khôi phục ID thành công")
         print(f" • Tổng số frame xử lý:    {m.total_frames} frames")
         print(f" • Tốc độ trung bình (FPS): {m.average_fps:.2f} FPS")
         print(f" • Độ trễ Inference tb:    {m.avg_inference_ms:.2f} ms")
