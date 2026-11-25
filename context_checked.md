@@ -37,11 +37,16 @@
       - Giai đoạn bán tự hành & mất dấu: Cho phép phi công can thiệp lái; nếu mất dấu mục tiêu do đổi góc nhìn $\to$ Drone xoay $360^\circ$ quét tìm kiếm dựa trên Memory Bank; nếu hết thời gian chờ không tìm thấy $\to$ Giữ vị trí (Hover).
   - **WP6.1 (Hoàn tất Thực nghiệm Benchmark 10 Video Drone & Web-Verification):**
     - Đã kết nối Google Drive, tải và trích xuất thêm 3 chuỗi video từ 15 video Val P-DESTRE (`val_11-11`, `val_13-11`, `val_14-11`), nâng tổng kho video kiểm thử lên **10 video** chuẩn hóa đa kịch bản.
-    - Chạy benchmark đối chứng toàn diện 10 video (1.199 frames, 5.754 detections):
-      - Tổng Unique IDs: Giảm từ **609 IDs** xuống **328 IDs** (giảm **-46.1%** hiện tượng nhảy ID trên toàn bộ kho dữ liệu).
-      - Số lượt Re-ID khôi phục thành công: **874 lượt**.
-      - Tốc độ xử lý: Duy trì mượt mà **~20 – 38 FPS** thời gian thực, độ trễ suy luận YOLO26s chỉ **9 – 21 ms**.
     - Thực hiện kiểm chứng `/web-verification` đối chiếu 5 bộ dữ liệu UAV tracking người chuẩn quốc tế (Stanford Drone Dataset, UAVDT, UAV-Human, Drone-Crowd, Thermal Aerial).
+  - **WP6.2 (Hoàn tất Chuẩn hóa Kho 20 Video & Benchmark Toàn Diện):**
+    - Loại bỏ 2 video kém chất lượng (`test_drone_10_20m.mp4` và `test_drone_10_20m_alt.mp4`) vào thư mục `data/excluded_videos/`.
+    - Tải và biên tập toàn bộ **15 video Val P-DESTRE chuẩn** (`val_pdestre_10_07_1_4.mp4` đến `val_pdestre_20_10_1_2.mp4`) từ Google Drive.
+    - Kết hợp cùng **5 video Benchmark** (`demo_drone_visdrone.mp4`, `test_drone_campus_15m.mp4`, `test_drone_square_pdestre.mp4`, `test_drone_street_pdestre.mp4`, `test_drone_walkway_pdestre.mp4`) $\implies$ Hoàn thiện kho dữ liệu **20 video kiểm thử chuẩn hóa** (1.214 frames, 8.961 bboxes).
+    - Kết quả đo lường đối chứng ByteTrack Gốc vs ByteTrack + Appearance Memory Bank:
+      - Tổng Unique IDs: Giảm từ **1.399 IDs** xuống **712 IDs** (giảm **-49.1%** hiện tượng nhảy ID trên toàn bộ 20 video).
+      - Số lượt Re-ID khôi phục danh tính thành công: **1.647 lượt**.
+      - Tốc độ xử lý: Duy trì mượt mà **~16 – 59 FPS** thời gian thực, độ trễ suy luận YOLO26s chỉ **8.9 – 20.8 ms**.
+      - File báo cáo định lượng đã lưu tại: `runs/benchmark_20_videos_report.csv`.
 
 ---
 

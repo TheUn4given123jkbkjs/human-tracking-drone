@@ -71,6 +71,13 @@
 | **`yolo26s_merged` + BoT-SORT** | **TẮT** *(Gốc)* | 70 IDs | Baseline | 0 | ~18 – 27 FPS | Bù rung lắc tốt nhưng FPS thấp |
 | **`yolo26s_merged` + BoT-SORT** | **BẬT (Memory Bank)** | **33 IDs** | **-52.9%** | **83 lượt** | ~17 – 20 FPS | Độ ổn định danh tính cao nhất (33 IDs), phù hợp máy trạm GPU mạnh |
 
+#### Đánh Giá Tổng Thể Trên Toàn Bộ Kho 20 Video Thực Nghiệm (15 Video Val P-DESTRE + 5 Video Benchmark):
+- **Quy mô mẫu kiểm định:** **20 video** chuẩn hóa (1.214 frames, 8.961 bounding boxes người).
+- **Tổng số Unique IDs:** Giảm từ **1.399 IDs** xuống còn **712 IDs** (giảm **-49.1%** hiện tượng phân mảnh quỹ đạo trên toàn bộ 20 video).
+- **Tổng số lượt Re-ID khôi phục:** **1.647 lượt** cứu vết thành công nhờ bộ nhớ đặc trưng HSV 3 vùng không gian cơ thể.
+- **Tốc độ trung bình toàn hệ thống:** Duy trì **~16 – 59 FPS** (Live trung bình ~22.5 FPS), độ trễ suy luận YOLO26s chỉ **8.9 – 20.8 ms**, đảm bảo thời gian thực tuyệt đối.
+- Báo cáo số liệu chi tiết từng video: `runs/benchmark_20_videos_report.csv`.
+
 ---
 
 ### 2.4. Giao Thức Khóa Mục Tiêu (Target Lock) & Điều Phối Bán Tự Hành (Semi-Autonomous FSM)
