@@ -4,6 +4,7 @@
 [![Ultralytics](https://img.shields.io/badge/Ultralytics-YOLO26%20(NMS--Free)-00599C.svg?logo=yolo&logoColor=white)](https://docs.ultralytics.com/)
 [![Trackers](https://img.shields.io/badge/Trackers-ByteTrack%20%7C%20BoT--SORT-brightgreen.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Modular%20OOP-orange.svg)]()
+[![Release](https://img.shields.io/badge/Release-v1.0-blue.svg)]()
 
 > **Đề tài NCKH:** Nhận diện & bám vết người thời gian thực cho thiết bị bay không người lái (UAV) sử dụng kiến trúc YOLO26 Native NMS-Free kết hợp ByteTrack & BoT-SORT.
 

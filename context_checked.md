@@ -1,5 +1,5 @@
 # Context Checkpoint — Nghiên cứu Khoa học
-> **Cập nhật ngày:** 25/11/2026 (Nâng cấp WP6: Cơ chế Appearance Memory Bank & Giao thức Target Lock/Re-acquire)
+> **Cập nhật ngày:** 25/11/2026 — **Nghiệm thu Milestone v1.0 (Hoàn thành toàn diện WP1 – WP6)**
 
 - **Tên Đề tài / Mục tiêu:** Nhận diện và theo dõi người bằng máy bay không người lái (UAV Human Detection & Tracking) sử dụng kiến trúc YOLO26 Native NMS-Free kết hợp ByteTrack & BoT-SORT cải tiến thêm lớp Appearance Memory Bank.
 - **Vấn đề Khoa học & Giả thuyết ($H_0/H_1$):**
