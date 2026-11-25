@@ -95,21 +95,28 @@ class TrackingVisualizer:
             if len(self.track_history[track_id]) > self.max_trail_len:
                 self.track_history[track_id].pop(0)
 
-            # Phân định màu và độ dày
+            # Phân định trạng thái bám vết
             is_locked = (locked_id is not None and track_id == locked_id)
             is_reid = (track_id in reacquired_set)
 
+            # Phân định màu sắc ngữ nghĩa và độ dày viền:
+            # 1. Khóa mục tiêu (Target Lock): Đỏ rực
+            # 2. Tái nhận diện khôi phục vết (Re-ID): Xanh biển (Ocean Blue)
+            # 3. Lần đầu nhận diện / bám vết thông thường: Vàng tươi
             if is_locked:
                 color = (0, 0, 255)  # Đỏ rực cho Locked Target
-                thickness = 3
+                thickness = 2
+                text_color = (255, 255, 255)
             elif is_reid:
-                color = (0, 255, 200)  # Xanh ngọc cho Re-ID Target
-                thickness = 2
+                color = (255, 140, 0)  # Xanh biển cho Re-ID Target
+                thickness = 1
+                text_color = (255, 255, 255)
             else:
-                color = self.get_color(track_id)
-                thickness = 2
+                color = (0, 230, 255)  # Vàng cho ID lần đầu nhận diện / thông thường
+                thickness = 1
+                text_color = (0, 0, 0)  # Chữ đen trên nền vàng tương phản cao
 
-            # Vẽ bounding box
+            # Vẽ bounding box viền siêu mảnh 1px (giảm phân nửa, không lấn át chi tiết người)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
             # Vẽ nhãn ID & Conf nhỏ gọn vừa vặn
@@ -121,9 +128,8 @@ class TrackingVisualizer:
 
             font_scale = 0.36
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
-            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
-            text_color = (0, 0, 0) if is_reid else (255, 255, 255)
-            cv2.putText(frame, label, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color, 1)
+            cv2.rectangle(frame, (x1, y1 - th - 3), (x1 + tw + 3, y1), color, -1)
+            cv2.putText(frame, label, (x1 + 2, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color, 1)
 
             # Vẽ vệt quỹ đạo (Trajectory Line) nếu show_trail được bật
             if self.show_trail:
