@@ -58,29 +58,34 @@
 
 ---
 
-### 2.3. Hiệu Năng Đột Phá Của Tầng Appearance Memory Bank (Tái Nhận Diện Re-ID Đa Vùng)
+### 2.3. Hiệu Năng Đột Phá Của Tầng Appearance Memory Bank & OCM
 
-Để khắc phục nhược điểm nhảy ID khi đối tượng bị che khuất tạm thời hoặc drone chao liệng, hệ thống được trang bị tầng **Appearance Memory Bank** (trích xuất vector màu HSV đa vùng không gian 3 tầng cơ thể: Đầu/Thân/Chân + so khớp Cosine Similarity lịch sử).
-
-#### Bảng Đo Lường Hiệu Năng Khi Kích Hoạt Appearance Memory Bank (`test_drone_square_pdestre.mp4`):
-
-| Cấu Hình Hệ Thống | Trạng Thái Memory Bank | Số Unique IDs | Tỷ Lệ Giảm ID Switches | Lượt Re-ID Khôi Phục | Live Tracking FPS | Nhận Xét Khoa Học |
-| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`yolo26s_merged` + ByteTrack** | **TẮT** *(Gốc)* | 102 IDs | Baseline | 0 | ~52 – 80 FPS | Tốc độ cao nhưng đứt gãy vết liên tục |
-| **`yolo26s_merged` + ByteTrack** | **BẬT (Memory Bank)** | **34 IDs** | **-66.7% (Đột phá)** | **134 lượt** | **~58 – 73 FPS** | **Sweet Spot: Giảm 2/3 số ID nhảy, tốc độ cực nhanh gấp 3.5 lần BoT-SORT** |
-| **`yolo26s_merged` + BoT-SORT** | **TẮT** *(Gốc)* | 70 IDs | Baseline | 0 | ~18 – 27 FPS | Bù rung lắc tốt nhưng FPS thấp |
-| **`yolo26s_merged` + BoT-SORT** | **BẬT (Memory Bank)** | **33 IDs** | **-52.9%** | **83 lượt** | ~17 – 20 FPS | Độ ổn định danh tính cao nhất (33 IDs), phù hợp máy trạm GPU mạnh |
-
-#### Đánh Giá Tổng Thể Trên Toàn Bộ Kho 20 Video Thực Nghiệm (15 Video Val P-DESTRE + 5 Video Benchmark):
-- **Quy mô mẫu kiểm định:** **20 video** chuẩn hóa (1.214 frames, 8.961 bounding boxes người).
-- **Tổng số Unique IDs:** Giảm từ **1.399 IDs** xuống còn **712 IDs** (giảm **-49.1%** hiện tượng phân mảnh quỹ đạo trên toàn bộ 20 video).
-- **Tổng số lượt Re-ID khôi phục:** **1.647 lượt** cứu vết thành công nhờ bộ nhớ đặc trưng HSV 3 vùng không gian cơ thể.
-- **Tốc độ trung bình toàn hệ thống:** Duy trì **~16 – 59 FPS** (Live trung bình ~22.5 FPS), độ trễ suy luận YOLO26s chỉ **8.9 – 20.8 ms**, đảm bảo thời gian thực tuyệt đối.
-- Báo cáo số liệu chi tiết từng video: `runs/benchmark_20_videos_report.csv`.
+Để khắc phục nhược điểm nhảy ID khi đối tượng bị che khuất tạm thời hoặc drone chao liệng, hệ thống tích hợp tầng **Adaptive Appearance Memory Bank** (kết hợp phân rã 3 dải dọc khi $h/w \ge 1.65$ và 3 vành đồng tâm khi $h/w < 1.65$) cùng bộ dự phóng quán tính vận tốc thực tế **Observation-Centric Momentum (OCM)**.
 
 ---
 
-### 2.4. Giao Thức Khóa Mục Tiêu (Target Lock) & Điều Phối Bán Tự Hành (Semi-Autonomous FSM)
+### 2.4. Thực Nghiệm Đối Chứng Trên 5 Video Flycam Góc Nghiêng Oblique (27° – 59° — Chuẩn 50–60 FPS)
+
+Thực nghiệm đo lường đối chứng giữa **ByteTrack Gốc** và **ByteTrack + Adaptive Memory Bank + OCM** sử dụng mô hình **`yolo26n_merged`** ở chế độ **`no-trail`** trên 5 video flycam chất lượng cao (3.715 frames, 126.258 detections):
+
+| Video ID | Góc Nghiêng Thực Tế | Số Frame | Tổng Detections | Baseline ByteTrack (IDs) | Đề Xuất (+ Memory & OCM) | Tỷ Lệ Giảm Nhảy ID | Lượt Re-ID Khôi Phục | Live Tracking FPS |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`video_01`** *(1345327468)* | $46.9^\circ$ | 511 | 46.877 | 656 IDs | **397 IDs** | **-39.48%** | 1.564 lượt | 30.2 FPS |
+| **`video_02`** *(1975140282)* | $27.1^\circ$ | 955 | 36.448 | 440 IDs | **286 IDs** | **-35.00%** | 660 lượt | 49.1 FPS |
+| **`video_03`** *(2272676305)* | $29.7^\circ$ | 1.439 | 19.926 | 414 IDs | **265 IDs** | **-35.99%** | 806 lượt | 45.2 FPS |
+| **`video_04`** *(2281108543)* | $50.1^\circ$ | 541 | 22.507 | 625 IDs | **347 IDs** | **-44.48%** | 1.125 lượt | 40.3 FPS |
+| **`video_05`** *(2288458623)* | $58.9^\circ$ | 269 | 500 | 48 IDs | **27 IDs** | **-43.75%** | 30 lượt | 61.6 FPS |
+| **TỔNG CỘNG** | **$27.1^\circ - 58.9^\circ$** | **3.715** | **126.258** | **2.183 IDs** | **1.322 IDs** | **-39.44%** | **4.185 lượt** | **45.3 FPS** |
+
+> [!NOTE]
+> **Nhận định khoa học cốt lõi:**
+> 1. **Hiệu quả cắt giảm phân mảnh vết (-39.44%):** Với đặc tính Recall $\sim 60-63\%$ của bài toán UAV cự ly trung bình, xác suất đối tượng xuất hiện liên tục 10 frames là $P \approx 0.63^{10} \approx 0.98\%$. Tầng OCM đón đầu quán tính kết hợp Memory Bank giúp phục hồi **4.185 lượt** đứt gãy vết, hạ tổng số ID từ 2.183 xuống 1.322 IDs.
+> 2. **Tối ưu hiển thị HUD & Định danh:** Bảng Telemetry HUD siêu gọn $220 \times 84\text{ px}$ (giảm 60% diện tích), định danh ID tuần tự từ `#1` và nhãn BBox cỡ chữ $0.36$ giúp phi công dễ dàng quan sát mục tiêu mà không bị rối mắt.
+> 3. **Tốc độ thời gian thực vượt trội:** Đạt trung bình **45.3 FPS** trên GPU cá nhân (độ trễ suy luận YOLO26n chỉ **9.26 – 13.31 ms**).
+
+---
+
+### 2.5. Giao Thức Khóa Mục Tiêu (Target Lock) & Điều Phối Bán Tự Hành (Semi-Autonomous FSM)
 
 Kiến trúc vận hành (`src/target_protocol.py`) định hình chu trình điều khiển thông minh giữa Ground Station và Drone (Pi 5):
 1. **Pha Tự Do (SEARCH_ALL_IDS):** Toàn bộ ID người trong khung hình đều được lưu trữ vector ngoại hình trong Memory Bank.
@@ -136,7 +141,7 @@ python track_drone.py --model <tên_mô_hình|đường_dẫn_.pt> --tracker <by
 | **`--source`** | Chuỗi | `data/test_drone_10_20m.mp4` | Đường dẫn file video `.mp4` đầu vào. |
 | **`--conf`** | Float | `0.20` | Ngưỡng tin cậy phát hiện (cự ly xa: `0.15 - 0.20`; cự ly gần: `0.25 - 0.35`). |
 | **`--iou`** | Float | `0.50` | Ngưỡng IoU ghép cặp liên kết vết. |
-| **`--trail`** / **`--no-trail`** | Flag | `--trail` *(Bật)* | Hiện hoặc ẩn vệt quỹ đạo di chuyển theo màu ID. |
+| **`--trail`** / **`--no-trail`** | Flag | `--no-trail` *(Mặc định tắt)* | Hiện hoặc ẩn vệt quỹ đạo di chuyển theo màu ID (mặc định tắt để khung hình quan sát của phi công thông thoáng). |
 | **`--memory`** / **`--no-memory`** | Flag | `--memory` *(Bật)* | Bật hoặc tắt tầng Appearance Memory Bank (Re-ID đa vùng). |
 | **`--sim-thresh`** | Float | `0.60` | Ngưỡng tương đồng Cosine để tái nhận diện (Re-ID) mục tiêu trong bộ nhớ. |
 | **`--max-lost-frames`** | Int | `60` | Số frame tối đa lưu trữ mục tiêu bị mất dấu trước khi giải phóng khỏi RAM. |
@@ -160,13 +165,14 @@ python track_drone.py --model yolo26s_merged --tracker botsort --source data/tes
 
 ---
 
-## 📈 5. GIAO DIỆN BẢNG THÔNG SỐ HUD (HEADS-UP DISPLAY)
+## 📈 5. GIAO DIỆN BẢNG THÔNG SỐ HUD (HEADS-UP DISPLAY) & THỊ GIÁC
 
-Bảng đo lường Telemetry HUD hiển thị trực tiếp ở góc trên bên trái video:
-* **MODEL / TRACKER:** Tên mô hình AI và thuật toán bám vết đang thực thi.
-* **LIVE FPS / LATENCY:** Tốc độ khung hình tức thời và độ trễ suy luận mạng nơ-ron (ms).
-* **NMS-FREE:** Độ trễ hậu xử lý Native NMS-Free ($\le 1.0\text{ ms}$).
-* **ACTIVE / UNIQUE IDS:** Số người đang bám vết đồng thời và tổng số ID duy nhất trong video.
+Bảng đo lường Telemetry HUD hiển thị trực tiếp ở góc trên bên trái video với thiết kế thu nhỏ $220 \times 84\text{ px}$ (giảm hơn 60% diện tích, độ trong suốt 70%, chữ sắc nét, không che khuất mục tiêu):
+* **MODEL | TRACKER:** Tên mô hình AI và thuật toán bám vết đang thực thi.
+* **FPS | Inf:** Tốc độ khung hình tức thời và độ trễ suy luận mạng nơ-ron (ms).
+* **Active | Total IDs:** Số đối tượng đang bám vết đồng thời và tổng số ID duy nhất (được đánh số tuần tự từ `#1` cho từng video).
+* **Re-ID:** Số lượt khôi phục danh tính thành công qua Memory Bank / Trạng thái TARGET LOCK.
+* **BBox Labels:** Cỡ chữ gọn gàng (`font_scale=0.36`), badge nền ôm sát vừa vặn viền hộp.
 
 ---
 

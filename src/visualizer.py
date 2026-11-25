@@ -13,10 +13,14 @@ class TrackingVisualizer:
     Lớp trực quan hóa chuyên dụng cho bám vết đối tượng người từ UAV.
     """
 
-    def __init__(self, max_trail_len: int = 35, show_trail: bool = True):
+    def __init__(self, max_trail_len: int = 35, show_trail: bool = False):
         self.max_trail_len = max_trail_len
         self.show_trail = show_trail
         self.track_history: Dict[int, List[Tuple[int, int]]] = {}
+
+    def reset(self):
+        """Xóa lịch sử vệt quỹ đạo cho video mới."""
+        self.track_history.clear()
 
     def get_color(self, track_id: int) -> Tuple[int, int, int]:
         """Tạo màu sắc riêng biệt, cố định và nổi bật cho từng ID."""
@@ -38,23 +42,24 @@ class TrackingVisualizer:
         reacquired_total: int = 0,
         locked_id: Optional[int] = None
     ) -> np.ndarray:
-        """Vẽ bảng đo lường Telemetry HUD góc trên bên trái khung hình drone."""
-        hud_w, hud_h = 380, 165
+        """Vẽ bảng đo lường Telemetry HUD nhỏ gọn, thanh thoát góc trên bên trái."""
+        hud_w, hud_h = 220, 84
         overlay = frame.copy()
-        cv2.rectangle(overlay, (15, 15), (15 + hud_w, 15 + hud_h), (25, 25, 25), -1)
-        cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
-        cv2.rectangle(frame, (15, 15), (15 + hud_w, 15 + hud_h), (0, 210, 255), 2)
+        cv2.rectangle(overlay, (10, 10), (10 + hud_w, 10 + hud_h), (20, 20, 20), -1)
+        cv2.addWeighted(overlay, 0.70, frame, 0.30, 0, frame)
+        cv2.rectangle(frame, (10, 10), (10 + hud_w, 10 + hud_h), (0, 180, 220), 1)
 
-        cv2.putText(frame, f"MODEL:   {model_name[:24]}", (28, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 1)
-        cv2.putText(frame, f"TRACKER: {tracker_name.upper()}", (28, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 255), 1)
-        cv2.putText(frame, f"LIVE FPS:{fps:5.1f} | Inf: {inference_ms:4.1f}ms", (28, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 0), 1)
-        cv2.putText(frame, f"NMS-Free:{postprocess_ms:4.2f}ms | Active: {active_count:02d}", (28, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 200, 50), 1)
-        cv2.putText(frame, f"TOTAL UNIQUE IDS: {unique_total}", (28, 136), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 255), 1)
-
-        mem_text = f"MEMORY RE-ID: {reacquired_total} recovered"
+        # Dòng 1: Mô hình & Thuật toán
+        cv2.putText(frame, f"{model_name[:14]} | {tracker_name.upper()}", (16, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 255), 1)
+        # Dòng 2: Tốc độ xử lý & Độ trễ
+        cv2.putText(frame, f"FPS: {fps:4.1f} | Inf: {inference_ms:4.1f}ms", (16, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 120), 1)
+        # Dòng 3: Số mục tiêu active & Tổng ID
+        cv2.putText(frame, f"Active: {active_count:02d} | Total IDs: {unique_total}", (16, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 215, 0), 1)
+        # Dòng 4: Tái nhận diện Re-ID
+        mem_text = f"Re-ID: {reacquired_total} recovered"
         if locked_id is not None:
             mem_text += f" | LOCK: #{locked_id}"
-        cv2.putText(frame, mem_text, (28, 158), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 255, 200), 1)
+        cv2.putText(frame, mem_text, (16, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (0, 240, 220), 1)
 
         return frame
 
@@ -107,17 +112,18 @@ class TrackingVisualizer:
             # Vẽ bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
-            # Vẽ nhãn ID & Conf
+            # Vẽ nhãn ID & Conf nhỏ gọn vừa vặn
             label = f"#{track_id} ({conf:.2f})"
             if is_locked:
-                label = f"TARGET LOCK #{track_id}"
+                label = f"LOCK #{track_id}"
             elif is_reid:
                 label = f"#{track_id} [RE-ID]"
 
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
-            cv2.rectangle(frame, (x1, y1 - th - 6), (x1 + tw + 6, y1), color, -1)
+            font_scale = 0.36
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
+            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
             text_color = (0, 0, 0) if is_reid else (255, 255, 255)
-            cv2.putText(frame, label, (x1 + 3, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.48, text_color, 1)
+            cv2.putText(frame, label, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color, 1)
 
             # Vẽ vệt quỹ đạo (Trajectory Line) nếu show_trail được bật
             if self.show_trail:

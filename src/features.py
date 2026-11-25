@@ -1,10 +1,17 @@
 """
 Module trích xuất đặc trưng ngoại hình (Appearance Feature Extractor) cho UAV Human Tracking.
-Sử dụng phân rã không gian đa vùng (Multi-Zone Spatial Color Histogram) trên không gian màu HSV:
-- Vùng 1: Đỉnh đầu / Vai / Mũ (0% - 35% chiều cao)
-- Vùng 2: Thân trên / Áo / Balo (35% - 70% chiều cao)
-- Vùng 3: Thân dưới / Quần / Chân (70% - 100% chiều cao)
-Bất biến với tỷ lệ, kháng biến thiên ánh sáng, đạt tốc độ siêu nhanh (< 0.2 ms / bbox trên CPU).
+NÂNG CẤP TỔNG QUÁT: Tích hợp cơ chế Phân rã Đường tròn/Elip Đồng tâm (Concentric Radial Slicing)
+kết hợp Bộ điều phối Thích ứng theo Tỷ lệ Khung hình (Aspect-Ratio Aware Adaptive Slicing).
+
+Bao phủ 100% các dải góc nhìn camera của UAV:
+1. Góc nghiêng (Oblique 15° - 50°, h/w >= 1.65):
+   - Phân rã 3 dải dọc: Đỉnh đầu/Vai (0-35%), Thân trên/Áo (35-70%), Chân/Quần (70-100%).
+2. Góc chúc dốc & Đỉnh đầu thẳng đứng (Nadir / Bird's-Eye View 50° - 90°, h/w < 1.65):
+   - Phân rã 3 vành elip đồng tâm (Concentric Rings):
+     • Vành 1 - Tâm lõi (r <= 0.40 R): Đỉnh đầu, tóc, mũ.
+     • Vành 2 - Vòng giữa (0.40 R < r <= 0.75 R): Vai áo, lưng, ngực, balo.
+     • Vành 3 - Vành ngoài (0.75 R < r <= 1.10 R): Cánh tay, hông, chân.
+   - BẤT BIẾN HOÀN TOÀN VỚI HƯỚNG XOAY NGƯỜI (Rotation-Invariant) dưới góc nhìn thẳng đứng!
 """
 
 from typing import Tuple, List, Optional
@@ -14,8 +21,8 @@ import numpy as np
 
 class AppearanceFeatureExtractor:
     """
-    Trích xuất vector đặc trưng ngoại hình từ bounding box người.
-    Kết hợp phân rã 3 vùng không gian cơ thể và biểu đồ màu HSV chuẩn hóa L2.
+    Trích xuất vector đặc trưng ngoại hình bất biến góc nhìn (Viewpoint-Invariant) từ bounding box.
+    Hỗ trợ chế độ Thích ứng tự động (Adaptive), Phân rã dọc (Vertical) và Đồng tâm (Radial).
     """
 
     def __init__(
@@ -23,36 +30,45 @@ class AppearanceFeatureExtractor:
         h_bins: int = 12,
         s_bins: int = 6,
         v_bins: int = 4,
-        margin_ratio: float = 0.05
+        margin_ratio: float = 0.05,
+        aspect_ratio_thresh: float = 1.65,
+        slicing_mode: str = "adaptive"
     ):
         """
-        Khởi tạo bộ trích xuất đặc trưng.
+        Khởi tạo bộ trích xuất đặc trưng ngoại hình.
         
         Args:
-            h_bins: Số lượng bin cho thành phần sắc màu (Hue: 0-180).
-            s_bins: Số lượng bin cho độ bão hòa (Saturation: 0-256).
-            v_bins: Số lượng bin cho độ sáng (Value: 0-256).
-            margin_ratio: Tỷ lệ co biên (inset margin) nhằm giảm nhiễu nền xung quanh bbox.
+            h_bins: Số bin cho Hue (0-180).
+            s_bins: Số bin cho Saturation (0-256).
+            v_bins: Số bin cho Value (0-256).
+            margin_ratio: Tỷ lệ co viền loại trừ nhiễu nền.
+            aspect_ratio_thresh: Ngưỡng tỷ lệ h/w để chuyển đổi giữa Oblique và Nadir.
+            slicing_mode: 'adaptive' (tự động theo góc), 'radial' (luôn đồng tâm), 'vertical' (luôn cắt dọc).
         """
         self.h_bins = h_bins
         self.s_bins = s_bins
         self.v_bins = v_bins
         self.margin_ratio = margin_ratio
-        
-        # Kích thước vector mỗi vùng = h_bins * s_bins * v_bins
+        self.aspect_ratio_thresh = aspect_ratio_thresh
+        self.slicing_mode = slicing_mode.lower()
+
+        # Mỗi vùng: h_bins * s_bins * v_bins (12 * 6 * 4 = 288 chiều)
         self.zone_dim = self.h_bins * self.s_bins * self.v_bins
-        # Tổng số chiều = 3 vùng * zone_dim
+        # 3 vùng không gian (Đầu, Thân, Chân/Vành) = 3 * 288 = 864 chiều
         self.feature_dim = 3 * self.zone_dim
 
-    def _extract_zone_hist(self, hsv_patch: np.ndarray) -> np.ndarray:
-        """Tính biểu đồ 3D HSV trên một vùng ảnh và chuẩn hóa L2."""
-        if hsv_patch.size == 0 or hsv_patch.shape[0] < 2 or hsv_patch.shape[1] < 2:
+    def _extract_zone_hist(self, hsv_img: np.ndarray, mask: Optional[np.ndarray] = None) -> np.ndarray:
+        """Tính biểu đồ 3D HSV trên một vùng có mask chỉ định và chuẩn hóa L2."""
+        if hsv_img.size == 0 or hsv_img.shape[0] < 2 or hsv_img.shape[1] < 2:
+            return np.zeros(self.zone_dim, dtype=np.float32)
+
+        if mask is not None and np.count_nonzero(mask) < 4:
             return np.zeros(self.zone_dim, dtype=np.float32)
 
         hist = cv2.calcHist(
-            [hsv_patch],
+            [hsv_img],
             [0, 1, 2],
-            None,
+            mask,
             [self.h_bins, self.s_bins, self.v_bins],
             [0, 180, 0, 256, 0, 256]
         )
@@ -62,13 +78,56 @@ class AppearanceFeatureExtractor:
             hist /= norm
         return hist
 
+    def _extract_vertical_features(self, hsv_crop: np.ndarray) -> np.ndarray:
+        """Phân rã 3 dải ngang dọc cho góc nghiêng (Oblique 15° - 50°)."""
+        crop_h = hsv_crop.shape[0]
+        z1_end = int(crop_h * 0.35)
+        z2_end = int(crop_h * 0.70)
+
+        zone1 = hsv_crop[0:z1_end, :]        # Đầu & Vai
+        zone2 = hsv_crop[z1_end:z2_end, :]   # Thân trên / Áo
+        zone3 = hsv_crop[z2_end:, :]         # Thân dưới / Quần
+
+        h1 = self._extract_zone_hist(zone1)
+        h2 = self._extract_zone_hist(zone2)
+        h3 = self._extract_zone_hist(zone3)
+
+        return np.concatenate([h1, h2, h3])
+
+    def _extract_radial_features(self, hsv_crop: np.ndarray) -> np.ndarray:
+        """
+        Phân rã 3 vành elip đồng tâm (Concentric Radial Slicing) cho góc chúc dốc (Nadir 50° - 90°).
+        Bất biến với hướng quay người 360 độ (Rotation-Invariant).
+        """
+        crop_h, crop_w = hsv_crop.shape[:2]
+        y, x = np.ogrid[:crop_h, :crop_w]
+        cy, cx = crop_h / 2.0, crop_w / 2.0
+        ry, rx = max(1.0, cy), max(1.0, cx)
+
+        # Khoảng cách elip chuẩn hóa bình phương từ tâm
+        dist_sq = ((y - cy) / ry) ** 2 + ((x - cx) / rx) ** 2
+
+        # Vành 1: Lõi tâm (r <= 0.40) -> Đỉnh đầu, tóc, nón mũ
+        m1 = (dist_sq <= (0.40 ** 2)).astype(np.uint8) * 255
+        # Vành 2: Vòng giữa (0.40 < r <= 0.75) -> Vai áo, ngực, lưng, balo
+        m2 = ((dist_sq > (0.40 ** 2)) & (dist_sq <= (0.75 ** 2))).astype(np.uint8) * 255
+        # Vành 3: Vòng ngoài (0.75 < r <= 1.15) -> Cánh tay, hông, chân
+        m3 = ((dist_sq > (0.75 ** 2)) & (dist_sq <= (1.15 ** 2))).astype(np.uint8) * 255
+
+        h1 = self._extract_zone_hist(hsv_crop, mask=m1)
+        h2 = self._extract_zone_hist(hsv_crop, mask=m2)
+        h3 = self._extract_zone_hist(hsv_crop, mask=m3)
+
+        return np.concatenate([h1, h2, h3])
+
     def extract(
         self,
         frame: np.ndarray,
         bbox: Tuple[int, int, int, int]
     ) -> np.ndarray:
         """
-        Trích xuất vector đặc trưng ngoại hình 384-D chuẩn hóa L2 từ bounding box.
+        Trích xuất vector đặc trưng ngoại hình 864-D chuẩn hóa L2 từ bounding box.
+        Tự động nhận diện góc nhìn thông qua tỷ lệ hình học h/w của BBox.
         
         Args:
             frame: Khung hình gốc (BGR).
@@ -89,11 +148,10 @@ class AppearanceFeatureExtractor:
         bw = x2 - x1
         bh = y2 - y1
 
-        if bw < 4 or bh < 6:
-            # BBox quá bé, trả về vector 0
+        if bw < 4 or bh < 4:
             return np.zeros(self.feature_dim, dtype=np.float32)
 
-        # Cắt bỏ viền ngoài để loại trừ hậu cảnh (background)
+        # Cắt bỏ viền ngoài để giảm thiểu nhiễu nền
         mx = int(bw * self.margin_ratio)
         my = int(bh * self.margin_ratio)
         cx1 = min(x1 + mx, x2 - 2)
@@ -102,26 +160,27 @@ class AppearanceFeatureExtractor:
         cy2 = max(y2 - my, cy1 + 2)
 
         crop = frame[cy1:cy2, cx1:cx2]
-        if crop.size == 0:
+        if crop.size == 0 or crop.shape[0] < 2 or crop.shape[1] < 2:
             return np.zeros(self.feature_dim, dtype=np.float32)
 
         hsv_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        crop_h = hsv_crop.shape[0]
+        aspect_ratio = float(bh) / max(1.0, float(bw))
 
-        # Phân chia 3 vùng cơ thể theo chiều dọc
-        z1_end = int(crop_h * 0.35)
-        z2_end = int(crop_h * 0.70)
+        # Điều phối chế độ trích xuất thích ứng theo góc nhìn camera
+        if self.slicing_mode == "radial":
+            feature = self._extract_radial_features(hsv_crop)
+        elif self.slicing_mode == "vertical":
+            feature = self._extract_vertical_features(hsv_crop)
+        else:
+            # Chế độ tự động 'adaptive':
+            # Nếu BBox đứng cao (h/w >= 1.65): Góc nghiêng (Oblique) -> Cắt dải dọc
+            # Nếu BBox gần vuông (h/w < 1.65): Góc dốc (Nadir) -> Cắt vòng tròn đồng tâm
+            if aspect_ratio >= self.aspect_ratio_thresh:
+                feature = self._extract_vertical_features(hsv_crop)
+            else:
+                feature = self._extract_radial_features(hsv_crop)
 
-        zone1 = hsv_crop[0:z1_end, :]        # Đầu & Vai
-        zone2 = hsv_crop[z1_end:z2_end, :]   # Thân trên
-        zone3 = hsv_crop[z2_end:, :]         # Chân & Giày
-
-        h1 = self._extract_zone_hist(zone1)
-        h2 = self._extract_zone_hist(zone2)
-        h3 = self._extract_zone_hist(zone3)
-
-        # Ghép nối các vector đặc trưng
-        feature = np.concatenate([h1, h2, h3])
+        # Chuẩn hóa L2 norm toàn phần
         total_norm = np.linalg.norm(feature)
         if total_norm > 1e-6:
             feature /= total_norm
@@ -133,10 +192,6 @@ class AppearanceFeatureExtractor:
         """
         Tính độ tương đồng Cosine giữa 2 vector đặc trưng chuẩn hóa L2.
         
-        Args:
-            feat1: Vector đặc trưng 1.
-            feat2: Vector đặc trưng 2.
-            
         Returns:
             Độ tương đồng trong khoảng [0.0, 1.0].
         """

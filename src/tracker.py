@@ -36,6 +36,8 @@ class UAVTracker:
         self.tracker_cfg = TRACKER_REGISTRY[self.tracker_type]
         self.use_memory = use_memory
         self.frame_idx = 0
+        self.baseline_id_map: Dict[int, int] = {}
+        self.next_baseline_id: int = 1
 
         # Khởi tạo Memory Bank nếu được kích hoạt
         if self.use_memory:
@@ -108,7 +110,34 @@ class UAVTracker:
             res.memory_processed = processed
             res.reacquired_this_frame = [p for p in processed if p.get("reacquired", False)]
         else:
+            # Chế độ Baseline: Ánh xạ tuần tự các ID từ 1 cho từng video
+            if res.boxes is not None and res.boxes.id is not None and len(res.boxes.id) > 0:
+                raw_ids = res.boxes.id.int().cpu().tolist()
+                clean_ids = []
+                for rid in raw_ids:
+                    if rid not in self.baseline_id_map:
+                        self.baseline_id_map[rid] = self.next_baseline_id
+                        self.next_baseline_id += 1
+                    clean_ids.append(self.baseline_id_map[rid])
+                if len(clean_ids) == len(res.boxes.data):
+                    new_data = res.boxes.data.clone()
+                    new_data[:, 4] = torch.tensor(clean_ids, dtype=new_data.dtype, device=new_data.device)
+                    res.boxes.data = new_data
+
             res.memory_processed = []
             res.reacquired_this_frame = []
 
         return res
+
+    def reset(self):
+        """Khởi động lại trạng thái tracker cho video mới (bắt đầu ID từ 1)."""
+        self.frame_idx = 0
+        self.baseline_id_map.clear()
+        self.next_baseline_id = 1
+        try:
+            from ultralytics.trackers.basetrack import BaseTrack
+            BaseTrack._count = 0
+        except Exception:
+            pass
+        if self.memory_bank is not None:
+            self.memory_bank.reset()

@@ -113,8 +113,8 @@ def parse_args():
     parser.add_argument(
         "--trail",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Hiện/Ẩn vệt đường quỹ đạo tracking (--trail: hiện | --no-trail: ẩn)"
+        default=False,
+        help="Hiện/Ẩn vệt đường quỹ đạo tracking (--trail: hiện | --no-trail: ẩn, mặc định: tắt)"
     )
     parser.add_argument(
         "--memory",

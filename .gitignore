@@ -28,7 +28,6 @@ Ultralytics/
 runs/
 *.avi
 *.mp4
-!data/demo_drone_visdrone.mp4
 
 # OS & Editor
 .DS_Store

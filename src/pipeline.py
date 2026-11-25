@@ -87,6 +87,12 @@ class UAVTrackingPipeline:
         print("="*70)
 
         self.metrics = TrackingMetrics()
+        # Khởi động lại trạng thái tracker và visualizer để bắt đầu ID tuần tự từ 1 cho video mới
+        if hasattr(self.tracker, "reset"):
+            self.tracker.reset()
+        if hasattr(self.visualizer, "reset"):
+            self.visualizer.reset()
+
         start_time = time.perf_counter()
         frame_idx = 0
 

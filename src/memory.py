@@ -39,6 +39,13 @@ class TrackMemory:
         self.last_seen_frame: int = frame_idx
         self.first_seen_frame: int = frame_idx
 
+        # Observation-Centric Momentum (OCM): Lịch sử tâm và vector vận tốc tức thời
+        self.center_history: deque = deque(maxlen=max_history)
+        self.center_history.append((self.last_center, frame_idx))
+        self.velocity: Tuple[float, float] = (0.0, 0.0)  # (vx, vy) pixel / frame
+        self.speed: float = 0.0
+        self.heading_angle: float = 0.0  # radian [-pi, pi]
+
         self.hits: int = 1
         self.lost_frames: int = 0
         self.age: int = 1
@@ -55,7 +62,7 @@ class TrackMemory:
         bbox: Tuple[int, int, int, int],
         frame_idx: int
     ) -> None:
-        """Cập nhật bộ nhớ với quan sát mới."""
+        """Cập nhật bộ nhớ với quan sát thực tế mới (Observation-Centric Update)."""
         self.feature_history.append(feature)
 
         # Cập nhật trung bình động EMA của vector đặc trưng
@@ -65,12 +72,37 @@ class TrackMemory:
             if norm > 1e-6:
                 self.mean_feature /= norm
 
+        new_center = self._calc_center(bbox)
+        dt = max(1, frame_idx - self.last_seen_frame)
+
+        # Tính toán vector vận tốc tức thời thực tế từ quan sát (OCM)
+        vx = (new_center[0] - self.last_center[0]) / float(dt)
+        vy = (new_center[1] - self.last_center[1]) / float(dt)
+
+        # Làm mượt vận tốc bằng EMA để khử nhiễu jitter của BBox
+        if self.hits > 1:
+            self.velocity = (0.7 * self.velocity[0] + 0.3 * vx, 0.7 * self.velocity[1] + 0.3 * vy)
+        else:
+            self.velocity = (vx, vy)
+
+        self.speed = float(np.hypot(self.velocity[0], self.velocity[1]))
+        if self.speed > 0.5:
+            self.heading_angle = float(np.arctan2(self.velocity[1], self.velocity[0]))
+
         self.last_bbox = bbox
-        self.last_center = self._calc_center(bbox)
+        self.last_center = new_center
+        self.center_history.append((new_center, frame_idx))
         self.last_seen_frame = frame_idx
         self.lost_frames = 0
         self.hits += 1
         self.age = frame_idx - self.first_seen_frame + 1
+
+    def predict_center(self, target_frame_idx: int) -> Tuple[float, float]:
+        """Dự phóng vị trí tâm đối tượng theo vector quán tính thực tế (OCM Extrapolation)."""
+        dt = max(0, target_frame_idx - self.last_seen_frame)
+        pred_x = self.last_center[0] + self.velocity[0] * dt
+        pred_y = self.last_center[1] + self.velocity[1] * dt
+        return (pred_x, pred_y)
 
     def compute_similarity(self, candidate_feature: np.ndarray) -> float:
         """
@@ -131,6 +163,7 @@ class AppearanceMemoryBank:
 
         # Bảng ánh xạ: raw_id từ base tracker -> canonical_id của memory bank
         self.id_remap_table: Dict[int, int] = {}
+        self.next_canonical_id: int = 1
 
         # Danh bạ các track đang hoạt động và các track bị mất dấu
         self.active_tracks: Dict[int, TrackMemory] = {}
@@ -242,7 +275,11 @@ class AppearanceMemoryBank:
             if cid in self.lost_tracks:
                 lost_track = self.lost_tracks[cid]
                 s = lost_track.compute_similarity(feat)
-                dist = np.hypot(center[0] - lost_track.last_center[0], center[1] - lost_track.last_center[1])
+                pred_c = lost_track.predict_center(frame_idx)
+                dist = min(
+                    float(np.hypot(center[0] - lost_track.last_center[0], center[1] - lost_track.last_center[1])),
+                    float(np.hypot(center[0] - pred_c[0], center[1] - pred_c[1]))
+                )
                 if s >= (self.similarity_thresh - 0.08) and dist <= self.max_spatial_distance:
                     matched_lost_id = cid
                     best_sim = s
@@ -256,9 +293,13 @@ class AppearanceMemoryBank:
                             continue
 
                     sim = lost_track.compute_similarity(feat)
-                    dist = np.hypot(center[0] - lost_track.last_center[0], center[1] - lost_track.last_center[1])
+                    pred_c = lost_track.predict_center(frame_idx)
+                    dist = min(
+                        float(np.hypot(center[0] - lost_track.last_center[0], center[1] - lost_track.last_center[1])),
+                        float(np.hypot(center[0] - pred_c[0], center[1] - pred_c[1]))
+                    )
 
-                    # Điều kiện tái nhận diện: Độ tương đồng ngoại hình cao và khoảng cách không gian hợp lý
+                    # Điều kiện tái nhận diện: Độ tương đồng ngoại hình cao và khoảng cách không gian (hoặc tâm dự phóng OCM) hợp lý
                     if sim >= self.similarity_thresh and dist <= self.max_spatial_distance:
                         if sim > best_sim:
                             best_sim = sim
@@ -289,16 +330,23 @@ class AppearanceMemoryBank:
                 results.append(cand)
             else:
                 # ĐỐI TƯỢNG MỚI HOÀN TOÀN
+                if raw_id in self.id_remap_table:
+                    assigned_id = self.id_remap_table[raw_id]
+                else:
+                    assigned_id = self.next_canonical_id
+                    self.next_canonical_id += 1
+                    self.id_remap_table[raw_id] = assigned_id
+
                 new_track = TrackMemory(
-                    track_id=cid,
+                    track_id=assigned_id,
                     initial_feature=feat,
                     initial_bbox=bbox,
                     frame_idx=frame_idx,
                     max_history=self.max_history
                 )
-                self.active_tracks[cid] = new_track
-                current_frame_canonical_ids.add(cid)
-                cand["track_id"] = cid
+                self.active_tracks[assigned_id] = new_track
+                current_frame_canonical_ids.add(assigned_id)
+                cand["track_id"] = assigned_id
                 results.append(cand)
 
         # Bước 3: Luân chuyển các track không quan sát được sang lost_tracks
@@ -323,6 +371,16 @@ class AppearanceMemoryBank:
                     del self.lost_tracks[lid]
 
         return results
+
+    def reset(self):
+        """Khởi động lại toàn bộ ngân hàng bộ nhớ cho video mới (bắt đầu ID từ 1)."""
+        self.next_canonical_id = 1
+        self.id_remap_table.clear()
+        self.active_tracks.clear()
+        self.lost_tracks.clear()
+        self.reacquired_events.clear()
+        self.total_reacquired_count = 0
+        self.locked_target_id = None
 
     def get_summary(self) -> Dict[str, Any]:
         """Tổng hợp thống kê hoạt động của bộ nhớ."""
