@@ -35,6 +35,13 @@
       - Giai đoạn tìm kiếm: Bật Memory cho toàn bộ ID.
       - Giai đoạn khóa mục tiêu: Gửi gói tin `LOCK_TARGET` $\to$ Pi5 trả về `ACK` $\to$ Chuyển sang cơ chế Dedicated Memory cho target.
       - Giai đoạn bán tự hành & mất dấu: Cho phép phi công can thiệp lái; nếu mất dấu mục tiêu do đổi góc nhìn $\to$ Drone xoay $360^\circ$ quét tìm kiếm dựa trên Memory Bank; nếu hết thời gian chờ không tìm thấy $\to$ Giữ vị trí (Hover).
+  - **WP6.1 (Hoàn tất Thực nghiệm Benchmark 10 Video Drone & Web-Verification):**
+    - Đã kết nối Google Drive, tải và trích xuất thêm 3 chuỗi video từ 15 video Val P-DESTRE (`val_11-11`, `val_13-11`, `val_14-11`), nâng tổng kho video kiểm thử lên **10 video** chuẩn hóa đa kịch bản.
+    - Chạy benchmark đối chứng toàn diện 10 video (1.199 frames, 5.754 detections):
+      - Tổng Unique IDs: Giảm từ **609 IDs** xuống **328 IDs** (giảm **-46.1%** hiện tượng nhảy ID trên toàn bộ kho dữ liệu).
+      - Số lượt Re-ID khôi phục thành công: **874 lượt**.
+      - Tốc độ xử lý: Duy trì mượt mà **~20 – 38 FPS** thời gian thực, độ trễ suy luận YOLO26s chỉ **9 – 21 ms**.
+    - Thực hiện kiểm chứng `/web-verification` đối chiếu 5 bộ dữ liệu UAV tracking người chuẩn quốc tế (Stanford Drone Dataset, UAVDT, UAV-Human, Drone-Crowd, Thermal Aerial).
 
 ---
 
