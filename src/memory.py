@@ -9,6 +9,14 @@ from collections import deque
 import numpy as np
 
 from src.features import AppearanceFeatureExtractor
+from src.config import (
+    DEFAULT_SIM_THRESH,
+    DEFAULT_MAX_LOST_FRAMES,
+    DEFAULT_ADAPTIVE_EXTRACTION,
+    DEFAULT_FEATURE_UPDATE_INTERVAL,
+    DEFAULT_PROXIMITY_THRESH,
+    DEFAULT_LOW_CONF_THRESH
+)
 
 
 class TrackMemory:
@@ -31,13 +39,17 @@ class TrackMemory:
 
         # Hàng đợi lưu trữ các vector đặc trưng gần nhất
         self.feature_history: deque = deque(maxlen=max_history)
-        self.feature_history.append(initial_feature)
-        self.mean_feature: np.ndarray = initial_feature.copy()
+        if initial_feature is not None and initial_feature.size > 0:
+            self.feature_history.append(initial_feature)
+            self.mean_feature: np.ndarray = initial_feature.copy()
+        else:
+            self.mean_feature = np.array([], dtype=np.float32)
 
         self.last_bbox: Tuple[int, int, int, int] = initial_bbox
         self.last_center: Tuple[float, float] = self._calc_center(initial_bbox)
         self.last_seen_frame: int = frame_idx
         self.first_seen_frame: int = frame_idx
+        self.last_feat_frame: int = frame_idx
 
         # Observation-Centric Momentum (OCM): Lịch sử tâm và vector vận tốc tức thời
         self.center_history: deque = deque(maxlen=max_history)
@@ -58,19 +70,23 @@ class TrackMemory:
 
     def update(
         self,
-        feature: np.ndarray,
+        feature: Optional[np.ndarray],
         bbox: Tuple[int, int, int, int],
         frame_idx: int
     ) -> None:
         """Cập nhật bộ nhớ với quan sát thực tế mới (Observation-Centric Update)."""
-        self.feature_history.append(feature)
+        if feature is not None and feature.size > 0:
+            self.feature_history.append(feature)
+            self.last_feat_frame = frame_idx
 
-        # Cập nhật trung bình động EMA của vector đặc trưng
-        if self.mean_feature.size > 0 and feature.size > 0:
-            self.mean_feature = (1.0 - self.ema_alpha) * self.mean_feature + self.ema_alpha * feature
-            norm = np.linalg.norm(self.mean_feature)
-            if norm > 1e-6:
-                self.mean_feature /= norm
+            # Cập nhật trung bình động EMA của vector đặc trưng
+            if self.mean_feature.size > 0:
+                self.mean_feature = (1.0 - self.ema_alpha) * self.mean_feature + self.ema_alpha * feature
+                norm = np.linalg.norm(self.mean_feature)
+                if norm > 1e-6:
+                    self.mean_feature /= norm
+            else:
+                self.mean_feature = feature.copy()
 
         new_center = self._calc_center(bbox)
         dt = max(1, frame_idx - self.last_seen_frame)
@@ -137,11 +153,15 @@ class AppearanceMemoryBank:
     def __init__(
         self,
         feature_extractor: Optional[AppearanceFeatureExtractor] = None,
-        similarity_thresh: float = 0.62,
-        max_lost_frames: int = 60,
+        similarity_thresh: float = DEFAULT_SIM_THRESH,
+        max_lost_frames: int = DEFAULT_MAX_LOST_FRAMES,
         max_spatial_distance: float = 450.0,
         max_history: int = 15,
-        mode: str = "all"
+        mode: str = "all",
+        adaptive_extraction: bool = DEFAULT_ADAPTIVE_EXTRACTION,
+        feature_update_interval: int = DEFAULT_FEATURE_UPDATE_INTERVAL,
+        proximity_thresh: float = DEFAULT_PROXIMITY_THRESH,
+        low_conf_thresh: float = DEFAULT_LOW_CONF_THRESH
     ):
         """
         Khởi tạo Memory Bank.
@@ -153,6 +173,10 @@ class AppearanceMemoryBank:
             max_spatial_distance: Bán kính pixel tối đa để so khớp không gian (chống nhầm người ở hai đầu video).
             max_history: Số lượng template lưu trữ cho mỗi track.
             mode: 'all' (lưu vết toàn bộ ID) hoặc 'locked_only' (chỉ tối ưu cho mục tiêu chỉ định).
+            adaptive_extraction: Bật cơ chế trích xuất thích ứng theo sự kiện (Adaptive Event-Triggered).
+            feature_update_interval: Tần suất làm mới đặc trưng định kỳ cho các track ổn định (mỗi N frame).
+            proximity_thresh: Bán kính pixel phát hiện tương tác/giao cắt gần giữa 2 người.
+            low_conf_thresh: Ngưỡng tin cậy kích hoạt trích xuất bảo vệ chống mất dấu.
         """
         self.extractor = feature_extractor or AppearanceFeatureExtractor()
         self.similarity_thresh = similarity_thresh
@@ -160,6 +184,11 @@ class AppearanceMemoryBank:
         self.max_spatial_distance = max_spatial_distance
         self.max_history = max_history
         self.mode = mode.lower()
+
+        self.adaptive_extraction = adaptive_extraction
+        self.feature_update_interval = max(1, feature_update_interval)
+        self.proximity_thresh = proximity_thresh
+        self.low_conf_thresh = low_conf_thresh
 
         # Bảng ánh xạ: raw_id từ base tracker -> canonical_id của memory bank
         self.id_remap_table: Dict[int, int] = {}
@@ -175,6 +204,66 @@ class AppearanceMemoryBank:
         # Thống kê hiệu năng
         self.reacquired_events: List[Dict[str, Any]] = []
         self.total_reacquired_count: int = 0
+        self.total_extractions_performed: int = 0
+        self.total_extractions_skipped: int = 0
+
+    @staticmethod
+    def _find_interacting_detections(
+        raw_detections: List[Dict[str, Any]],
+        iou_thresh: float = 0.10,
+        center_dist_scale: float = 0.85
+    ) -> List[bool]:
+        """
+        Phát hiện các mục tiêu đang tương tác gần (giao cắt, che khuất một phần, hoặc quá sát nhau)
+        trong cùng khung hình theo tỷ lệ kích thước BBox thực tế (Scale-Invariant),
+        để kích hoạt trích xuất đặc trưng bắt buộc, chống 100% rủi ro ID Switch.
+        """
+        n = len(raw_detections)
+        if n <= 1:
+            return [False] * n
+
+        interacting = [False] * n
+        boxes = [d["bbox"] for d in raw_detections]
+
+        for i in range(n):
+            b1 = boxes[i]
+            w1 = b1[2] - b1[0]
+            h1 = b1[3] - b1[1]
+            c1x = (b1[0] + b1[2]) / 2.0
+            c1y = (b1[1] + b1[3]) / 2.0
+            area1 = max(1, w1 * h1)
+
+            for j in range(i + 1, n):
+                b2 = boxes[j]
+                w2 = b2[2] - b2[0]
+                h2 = b2[3] - b2[1]
+                c2x = (b2[0] + b2[2]) / 2.0
+                c2y = (b2[1] + b2[3]) / 2.0
+
+                # 1. Kiểm tra IoU giao nhau giữa 2 BBox
+                ix1 = max(b1[0], b2[0])
+                iy1 = max(b1[1], b2[1])
+                ix2 = min(b1[2], b2[2])
+                iy2 = min(b1[3], b2[3])
+                if ix2 > ix1 and iy2 > iy1:
+                    inter_area = (ix2 - ix1) * (iy2 - iy1)
+                    area2 = max(1, w2 * h2)
+                    iou = inter_area / float(area1 + area2 - inter_area)
+                    if iou >= iou_thresh:
+                        interacting[i] = True
+                        interacting[j] = True
+                        continue
+
+                # 2. Kiểm tra khoảng cách tâm tương đối theo kích thước mục tiêu (Scale-Invariant)
+                w_avg = (w1 + w2) / 2.0
+                h_avg = (h1 + h2) / 2.0
+                dx = abs(c1x - c2x)
+                dy = abs(c1y - c2y)
+                if dx < (center_dist_scale * w_avg) and dy < (0.65 * h_avg):
+                    interacting[i] = True
+                    interacting[j] = True
+
+        return interacting
 
     def lock_target(self, target_id: int) -> bool:
         """Khóa một ID cụ thể làm mục tiêu chính."""
@@ -228,16 +317,50 @@ class AppearanceMemoryBank:
         results: List[Dict[str, Any]] = []
         current_frame_canonical_ids = set()
 
-        # Bước 1: Trích xuất đặc trưng và chuẩn bị danh sách candidate
+        # Phát hiện tương tác / giao cắt gần giữa các BBox trong frame (Scale-Invariant)
+        interacting = self._find_interacting_detections(raw_detections)
+
+        # Bước 1: Quyết định trích xuất thích ứng và chuẩn bị danh sách candidate
         candidates = []
-        for det in raw_detections:
+        for i, det in enumerate(raw_detections):
             raw_id = det["raw_id"]
             bbox = det["bbox"]
             conf = det["conf"]
-
-            feat = self.extractor.extract(frame, bbox)
             canonical_id = self.id_remap_table.get(raw_id, raw_id)
             center = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+
+            # Quyết định có trích xuất đặc trưng ngoại hình hay không (Adaptive Event-Triggered)
+            force_extract = False
+            if not self.adaptive_extraction:
+                force_extract = True
+            elif canonical_id not in self.active_tracks:
+                # 1. Target mới hoặc ứng viên Re-ID từ Lost Bank -> Bắt buộc trích xuất
+                force_extract = True
+            elif canonical_id == self.locked_target_id:
+                # 2. Target đang được khóa -> Luôn ưu tiên trích xuất
+                force_extract = True
+            elif interacting[i]:
+                # 3. Đang giao cắt / ở gần mục tiêu khác -> Bắt buộc trích xuất chống ID Switch
+                force_extract = True
+            elif conf < self.low_conf_thresh:
+                # 4. Độ tin cậy thấp (nguy cơ mất dấu) -> Bắt buộc trích xuất
+                force_extract = True
+            elif self.active_tracks[canonical_id].hits < 3:
+                # 5. Track mới hình thành chưa ổn định -> Bắt buộc trích xuất
+                force_extract = True
+            elif (frame_idx - self.active_tracks[canonical_id].last_feat_frame) >= self.feature_update_interval:
+                # 6. Đến chu kỳ làm mới định kỳ -> Bắt buộc trích xuất
+                force_extract = True
+            else:
+                # Track ổn định, đơn lẻ, không nguy cơ -> Bỏ qua trích xuất để tiết kiệm CPU
+                force_extract = False
+
+            if force_extract:
+                feat = self.extractor.extract(frame, bbox)
+                self.total_extractions_performed += 1
+            else:
+                feat = None
+                self.total_extractions_skipped += 1
 
             candidates.append({
                 "raw_id": raw_id,
@@ -247,7 +370,8 @@ class AppearanceMemoryBank:
                 "feat": feat,
                 "center": center,
                 "reacquired": False,
-                "sim": 0.0
+                "sim": 0.0,
+                "feat_extracted": force_extract
             })
 
         # Bước 2: Phân loại tiếp tục bám vết hoặc Re-ID
@@ -380,14 +504,21 @@ class AppearanceMemoryBank:
         self.lost_tracks.clear()
         self.reacquired_events.clear()
         self.total_reacquired_count = 0
+        self.total_extractions_performed = 0
+        self.total_extractions_skipped = 0
         self.locked_target_id = None
 
     def get_summary(self) -> Dict[str, Any]:
         """Tổng hợp thống kê hoạt động của bộ nhớ."""
+        total_ops = self.total_extractions_performed + self.total_extractions_skipped
+        skip_pct = (self.total_extractions_skipped / total_ops * 100.0) if total_ops > 0 else 0.0
         return {
             "total_reacquired": self.total_reacquired_count,
             "active_tracks_count": len(self.active_tracks),
             "lost_tracks_count": len(self.lost_tracks),
             "unique_canonical_ids": len(self.active_tracks) + len(self.lost_tracks) + len(self.id_remap_table),
+            "extractions_performed": self.total_extractions_performed,
+            "extractions_skipped": self.total_extractions_skipped,
+            "extractions_skipped_percent": skip_pct,
             "events": self.reacquired_events
         }

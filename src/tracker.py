@@ -7,7 +7,11 @@ from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 import torch
 
-from src.config import TRACKER_REGISTRY
+from src.config import (
+    TRACKER_REGISTRY,
+    DEFAULT_ADAPTIVE_EXTRACTION,
+    DEFAULT_FEATURE_UPDATE_INTERVAL
+)
 from src.detector import UAVDetector
 from src.memory import AppearanceMemoryBank
 
@@ -26,7 +30,9 @@ class UAVTracker:
         similarity_thresh: float = 0.62,
         max_lost_frames: int = 60,
         max_spatial_distance: float = 450.0,
-        memory_mode: str = "all"
+        memory_mode: str = "all",
+        adaptive_extraction: bool = DEFAULT_ADAPTIVE_EXTRACTION,
+        feature_update_interval: int = DEFAULT_FEATURE_UPDATE_INTERVAL
     ):
         self.detector = detector
         self.tracker_type = tracker_type.lower()
@@ -45,7 +51,9 @@ class UAVTracker:
                 similarity_thresh=similarity_thresh,
                 max_lost_frames=max_lost_frames,
                 max_spatial_distance=max_spatial_distance,
-                mode=memory_mode
+                mode=memory_mode,
+                adaptive_extraction=adaptive_extraction,
+                feature_update_interval=feature_update_interval
             )
             print(f"[*] [UAVTracker] Khởi tạo thuật toán: {self.tracker_type.upper()} ({self.tracker_cfg}) + [APPEARANCE MEMORY BANK ON]")
         else:

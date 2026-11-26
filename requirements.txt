@@ -1,0 +1,18 @@
+# =============================================================================
+# UAV Human Tracking System — Dependencies (v1.1)
+# =============================================================================
+
+# AI & Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.3.0
+
+# Computer Vision & Numerical Processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+tqdm>=4.65.0
+pandas>=2.0.0
+
+# Real-Time H.264 Video Codec (P2 Low-Latency Visual Lossless)
+av>=14.0.0
+imageio-ffmpeg>=0.5.0

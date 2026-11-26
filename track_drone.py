@@ -39,8 +39,9 @@ def print_available_models():
             
     print("-" * 80)
     print("💡 CÁCH GỌI LỆNH CHUẨN XÁC:")
-    print("   python track_drone.py --model yolo26s_merged        # Ground Station Model (Khuyên dùng)")
-    print("   python track_drone.py --model yolo26n_merged        # Drone Onboard Model")
+    print("   python track_drone.py                               # Chạy mặc định với yolo26n_merged (Tối ưu Real-time)")
+    print("   python track_drone.py --model yolo26n_merged        # Drone Onboard Model (Mặc định)")
+    print("   python track_drone.py --model yolo26s_merged        # Ground Station High-Accuracy Model")
     print("   python track_drone.py --model yolo26n_visdrone      # Baseline Model")
     print("=" * 80)
 
@@ -71,8 +72,26 @@ def parse_args():
     parser.add_argument(
         "--source",
         type=str,
-        default="data/test_drone_10_20m.mp4",
-        help="Đường dẫn video đầu vào"
+        default="data/gettyimages-1345327468-640_adpp.mp4",
+        help="Nguồn video đầu vào: đường dẫn file .mp4, camera index (0, 1), hoặc luồng Wi-Fi RTSP drone (rtsp://...)"
+    )
+    parser.add_argument(
+        "--stream-type",
+        type=str,
+        default="auto",
+        help="Loại/Giao thức nguồn video: 'auto' (tự nhận diện), 'camera' (webcam laptop), 'rtsp' (Wi-Fi drone RTSP/UDP), 'file' (tệp video), hoặc tên class đăng ký mới"
+    )
+    parser.add_argument(
+        "--receiver-module",
+        type=str,
+        default=None,
+        help="Đường dẫn file Python chứa class Stream Receiver tùy biến cần nạp (ví dụ: 'examples/custom_drone_receiver.py')"
+    )
+    parser.add_argument(
+        "--record-fps",
+        type=float,
+        default=None,
+        help="Tốc độ FPS khi ghi video đầu ra (mặc định: tự động theo nguồn hoặc 25 FPS cho live stream)"
     )
     parser.add_argument(
         "--out",
@@ -123,6 +142,18 @@ def parse_args():
         help="Bật/Tắt tầng Appearance Memory Bank (--memory: bật | --no-memory: tắt)"
     )
     parser.add_argument(
+        "--adaptive-memory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Bật/Tắt trích xuất thích ứng theo sự kiện (--adaptive-memory: bật | --no-adaptive-memory: tắt)"
+    )
+    parser.add_argument(
+        "--feat-interval",
+        type=int,
+        default=3,
+        help="Tần suất làm mới đặc trưng định kỳ cho các track ổn định (mỗi N frame, mặc định: 3)"
+    )
+    parser.add_argument(
         "--sim-thresh",
         type=float,
         default=0.60,
@@ -141,9 +172,10 @@ def parse_args():
         help="Giới hạn số frame kiểm thử (None = chạy hết video)"
     )
     parser.add_argument(
-        "--display",
-        action="store_true",
-        help="Hiển thị cửa sổ xem trực tiếp"
+        "--view",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Bật/Tắt cửa sổ theo dõi trực tiếp P2 (--view / --no-view). Mặc định: Tự động BẬT với Camera/RTSP, TẮT với video file"
     )
     return parser.parse_args()
 
@@ -151,10 +183,27 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Nạp module receiver tùy biến nếu được chỉ định
+    if args.receiver_module:
+        import importlib.util
+        p = Path(args.receiver_module).resolve()
+        if not p.exists():
+            raise FileNotFoundError(f"[!] Không tìm thấy file module receiver: {args.receiver_module}")
+        spec = importlib.util.spec_from_file_location(p.stem, p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        print(f"[+] Đã nạp thành công module receiver: {args.receiver_module}")
+
     # Kiểm tra lệnh hiển thị danh sách models
     if args.list_models:
         print_available_models()
         sys.exit(0)
+
+    # Tự động hóa xử lý khi chỉ định stream-type mà không truyền source
+    if args.stream_type == "camera" and args.source == "data/gettyimages-1345327468-640_adpp.mp4":
+        args.source = "0"
+    elif args.stream_type == "rtsp" and args.source == "data/gettyimages-1345327468-640_adpp.mp4":
+        raise ValueError("[!] Khi sử dụng '--stream-type rtsp', bạn cần cung cấp URL luồng drone qua cờ '--source' (ví dụ: --source rtsp://192.168.1.1:8554/live).")
 
     # 1. Khởi tạo UAVDetector (Quét động mô hình theo tên thư mục)
     detector = UAVDetector(
@@ -171,7 +220,9 @@ def main():
         tracker_type=args.tracker,
         use_memory=args.memory,
         similarity_thresh=args.sim_thresh,
-        max_lost_frames=args.max_lost_frames
+        max_lost_frames=args.max_lost_frames,
+        adaptive_extraction=args.adaptive_memory,
+        feature_update_interval=args.feat_interval
     )
 
     # 3. Khởi tạo TrackingVisualizer (Vẽ BBox, Trajectory trail, HUD Telemetry)
@@ -185,12 +236,21 @@ def main():
         frame_step=args.step
     )
 
-    # 5. Thực thi bám vết
+    # 5. Tự động hóa thông minh (Smart default) cho cờ --view:
+    # - Nếu là live stream (camera 0, rtsp://...): Tự động BẬT cửa sổ theo dõi P2
+    # - Nếu là file video: Mặc định chạy nền ghi video, trừ khi người dùng chỉ định --view
+    src_str = str(args.source).strip().lower()
+    is_live_source = src_str.isdigit() or any(src_str.startswith(p) for p in ["rtsp://", "rtsps://", "udp://", "http://", "https://"])
+    should_view = is_live_source if args.view is None else args.view
+
+    # 6. Thực thi bám vết
     pipeline.run_video(
         source_path=args.source,
         output_path=args.out,
         max_frames=args.max_frames,
-        display=args.display
+        view=should_view,
+        stream_type=args.stream_type,
+        record_fps=args.record_fps
     )
 
 
